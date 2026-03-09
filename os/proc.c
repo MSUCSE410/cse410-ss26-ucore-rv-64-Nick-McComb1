@@ -4,6 +4,8 @@
 #include "trap.h"
 #include "vm.h"
 
+#include "timer.h"
+
 struct proc pool[NPROC];
 __attribute__((aligned(16))) char kstack[NPROC][PAGE_SIZE];
 __attribute__((aligned(4096))) char trapframe[NPROC][TRAP_PAGE_SIZE];
