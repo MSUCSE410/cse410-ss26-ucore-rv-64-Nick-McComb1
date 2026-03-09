@@ -5,6 +5,7 @@
 #include "types.h"
 
 #define NPROC (16)
+#define MAX_SYSCALL_NUM 500
 
 //taskstatus enumeration
 typedef enum {
