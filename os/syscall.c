@@ -34,27 +34,17 @@ uint64 sys_sched_yield()
 
 uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofday in pagetable. (VA to PA)
 {
-	// YOUR CODE
-	val->sec = 0;
-	val->usec = 0;
-	struct proc *p = curr_proc();
+    struct proc *p = curr_proc();
 
-    uint64 pa = useraddr(p->pagetable, (uint64)val);
-    if(pa == 0)
+    TimeVal tv;
+    uint64 cycle = get_cycle();
+    tv.sec = cycle / CPU_FREQ;
+    tv.usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
+
+    if(copyout(p->pagetable, (uint64)val, (char*)&tv, sizeof(TimeVal)) < 0)
         return -1;
 
-    TimeVal *kval = (TimeVal *)pa;
-
-    uint64 cycle = get_cycle();
-    kval->sec = cycle / CPU_FREQ;
-    kval->usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
-
     return 0;
-	/* The code in `ch3` will leads to memory bugs*/
-
-	// uint64 cycle = get_cycle();
-	// val->sec = cycle / CPU_FREQ;
-	// val->usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
 }
 
 // TODO: add support for mmap and munmap syscall.
@@ -64,19 +54,17 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofd
 * LAB1: you may need to define sys_task_info here
 */
 uint64 sys_task_info(TaskInfo *ti){
-	if (!ti) return -1;
 	struct proc *p = curr_proc();
-    uint64 pa = useraddr(p->pagetable, (uint64)ti);
-    if(pa == 0)
+
+    TaskInfo info = p->ti;
+
+    uint64 now = (get_cycle() * 1000) / CPU_FREQ;
+    info.time = now - info.start_time;
+
+    if(copyout(p->pagetable, (uint64)ti, (char*)&info, sizeof(TaskInfo)) < 0)
         return -1;
 
-    TaskInfo *kti = (TaskInfo *)pa;
-
-	uint64 now = (get_cycle() * 1000) / CPU_FREQ;
-    *kti = p->ti;
-	kti->time = now - kti->start_time;
-
-    return 0;             
+    return 0;     
 }
 
 extern char trap_page[];
