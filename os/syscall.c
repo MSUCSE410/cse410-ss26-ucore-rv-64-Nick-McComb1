@@ -4,6 +4,8 @@
 #include "syscall_ids.h"
 #include "timer.h"
 #include "trap.h"
+#include "proc.h"
+#include "vm.h"
 
 uint64 sys_write(int fd, uint64 va, uint len)
 {
@@ -50,6 +52,91 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofd
 // TODO: add support for mmap and munmap syscall.
 // hint: read through docstrings in vm.c. Watching CH4 video may also help.
 // Note the return value and PTE flags (especially U,X,W,R)
+
+uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
+{
+    struct proc *p = curr_proc();
+
+    // 1. len == 0 → success
+    if (len == 0)
+        return 0;
+
+    // 2. max size check (1 GiB)
+    if (len > (1ULL << 30))
+        return -1;
+
+    // 3. validate port bits
+    if ((port & ~0x7) != 0)   // invalid bits
+        return -1;
+
+    if ((port & 0x7) == 0)    // no permissions
+        return -1;
+
+    // 4. align addresses
+    uint64 va = PGROUNDDOWN(start);
+    uint64 end = PGROUNDUP(start + len);
+
+    // 5. check if already mapped
+    for (uint64 a = va; a < end; a += PGSIZE) {
+        pte_t *pte = walk(p->pagetable, a, 0);
+        if (pte && (*pte & PTE_V)) {
+            return -1; // already mapped
+        }
+    }
+
+    // 6. convert port → PTE permissions
+    int perm = PTE_U;
+
+    if (port & 0x1) perm |= PTE_R;
+    if (port & 0x2) perm |= PTE_W;
+    if (port & 0x4) perm |= PTE_X;
+
+    // 7. allocate + map pages
+    uint64 a;
+    for (a = va; a < end; a += PGSIZE) {
+        char *mem = kalloc();
+        if (mem == 0) {
+            // cleanup previously allocated pages
+            uvmunmap(p->pagetable, va, (a - va) / PGSIZE, 1);
+            return -1;
+        }
+
+        memset(mem, 0, PGSIZE);
+
+        if (mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) != 0) {
+            kfree(mem);
+            uvmunmap(p->pagetable, va, (a - va) / PGSIZE, 1);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+uint64 sys_munmap(uint64 start, uint64 len)
+{
+    struct proc *p = curr_proc();
+
+    if (len == 0)
+        return 0;
+
+    uint64 va = PGROUNDDOWN(start);
+    uint64 end = PGROUNDUP(start + len);
+
+    // Ensure all pages are mapped
+    for (uint64 a = va; a < end; a += PGSIZE) {
+        pte_t *pte = walk(p->pagetable, a, 0);
+        if (pte == 0 || (*pte & PTE_V) == 0) {
+            return -1;
+        }
+    }
+
+    // Unmap and free
+    uvmunmap(p->pagetable, va, (end - va) / PGSIZE, 1);
+
+    return 0;
+}
+
 /*
 * LAB1: you may need to define sys_task_info here
 */
@@ -101,6 +188,12 @@ void syscall()
 	*/
 	case SYS_taskinfo:
 		ret = sys_task_info((TaskInfo *) args[0]);
+		break;
+	case SYS_mmap:
+		ret = sys_mmap(args[0], args[1], args[2], args[3], args[4]);
+		break;
+	case SYS_munmap:
+		ret = sys_munmap(args[0], args[1]);
 		break;
 	default:
 		ret = -1;
