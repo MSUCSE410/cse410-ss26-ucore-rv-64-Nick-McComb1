@@ -61,42 +61,45 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
     if (len == 0)
         return 0;
 
-    // 2. max size check (1 GiB)
+    // 2. max size (1 GiB)
     if (len > (1ULL << 30))
         return -1;
 
-    // 3. validate port bits
-    if ((port & ~0x7) != 0)   // invalid bits
+    // 3. port validation
+    if ((port & ~0x7) != 0)   // only lower 3 bits allowed
         return -1;
 
-    if ((port & 0x7) == 0)    // no permissions
+    if ((port & 0x7) == 0)    // must have at least one permission
         return -1;
 
-    // 4. align addresses
-    uint64 va = PGROUNDDOWN(start);
-    uint64 end = PGROUNDUP(start + len);
+    // 4. alignment (VERY IMPORTANT for your tests)
+    if ((start % PGSIZE) != 0)
+        return -1;
 
-    // 5. check if already mapped
+    if ((len % PGSIZE) != 0)
+        return -1;
+
+    uint64 va = start;
+    uint64 end = start + len;
+
+    // 5. check for already mapped pages
     for (uint64 a = va; a < end; a += PGSIZE) {
-        pte_t *pte = walk(p->pagetable, a, 0);
-        if (pte && (*pte & PTE_V)) {
-            return -1; // already mapped
+        if (walkaddr(p->pagetable, a) != 0) {
+            return -1;
         }
     }
 
-    // 6. convert port → PTE permissions
+    // 6. convert port → PTE flags
     int perm = PTE_U;
-
     if (port & 0x1) perm |= PTE_R;
     if (port & 0x2) perm |= PTE_W;
     if (port & 0x4) perm |= PTE_X;
 
     // 7. allocate + map pages
-    uint64 a;
-    for (a = va; a < end; a += PGSIZE) {
+    for (uint64 a = va; a < end; a += PGSIZE) {
         char *mem = kalloc();
         if (mem == 0) {
-            // cleanup previously allocated pages
+            // rollback previously allocated pages
             uvmunmap(p->pagetable, va, (a - va) / PGSIZE, 1);
             return -1;
         }
@@ -120,19 +123,24 @@ uint64 sys_munmap(uint64 start, uint64 len)
     if (len == 0)
         return 0;
 
-    uint64 va = PGROUNDDOWN(start);
-    uint64 end = PGROUNDUP(start + len);
+    // ❗ IMPORTANT: enforce alignment
+    if ((start % PGSIZE) != 0)
+        return -1;
 
-    // Ensure all pages are mapped
-    for (uint64 a = va; a < end; a += PGSIZE) {
-        pte_t *pte = walk(p->pagetable, a, 0);
-        if (pte == 0 || (*pte & PTE_V) == 0) {
+    if ((len % PGSIZE) != 0)
+        return -1;
+
+    uint64 va = start;
+    uint64 npages = len / PGSIZE;
+
+    // check all pages are mapped
+    for (uint64 i = 0; i < npages; i++) {
+        pte_t *pte = walk(p->pagetable, va + i * PGSIZE, 0);
+        if (!pte || (*pte & PTE_V) == 0)
             return -1;
-        }
     }
 
-    // Unmap and free
-    uvmunmap(p->pagetable, va, (end - va) / PGSIZE, 1);
+    uvmunmap(p->pagetable, va, npages, 1);
 
     return 0;
 }
@@ -153,6 +161,12 @@ uint64 sys_task_info(TaskInfo *ti){
 
     return 0;     
 }
+
+// uint64 sys_pid(int *pid){
+// 	if (!pid) return -1;
+// 	*pid = threadid();
+// 	return 0;
+// }
 
 extern char trap_page[];
 
@@ -183,6 +197,9 @@ void syscall()
 	case SYS_gettimeofday:
 		ret = sys_gettimeofday((TimeVal *)args[0], args[1]);
 		break;
+	// case SYS_getpid:
+	// 	ret = sys_pid((int *)args[0]);
+	// 	break;
 	/*
 	* LAB1: you may need to add SYS_taskinfo case here
 	*/
