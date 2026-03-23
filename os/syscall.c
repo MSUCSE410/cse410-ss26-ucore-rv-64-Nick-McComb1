@@ -60,27 +60,21 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
     // 1. len == 0 → success
     if (len == 0)
         return 0;
-
     // 2. max size (1 GiB)
     if (len > (1ULL << 30))
         return -1;
-
     // 3. port validation
     if ((port & ~0x7) != 0)   // only lower 3 bits allowed
         return -1;
-
     if ((port & 0x7) == 0)    // must have at least one permission
         return -1;
-
     // 4. alignment (VERY IMPORTANT for your tests)
     if ((start % PGSIZE) != 0)
         return -1;
 
-    if ((len % PGSIZE) != 0)
-        return -1;
-
+    uint64 aligned_len = PGROUNDUP(len);
     uint64 va = start;
-    uint64 end = start + len;
+    uint64 end = start + aligned_len;
 
     // 5. check for already mapped pages
     for (uint64 a = va; a < end; a += PGSIZE) {
@@ -103,16 +97,13 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
             uvmunmap(p->pagetable, va, (a - va) / PGSIZE, 1);
             return -1;
         }
-
         memset(mem, 0, PGSIZE);
-
         if (mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) != 0) {
             kfree(mem);
             uvmunmap(p->pagetable, va, (a - va) / PGSIZE, 1);
             return -1;
         }
     }
-
     return 0;
 }
 
@@ -122,17 +113,14 @@ uint64 sys_munmap(uint64 start, uint64 len)
 
     if (len == 0)
         return 0;
-
     // ❗ IMPORTANT: enforce alignment
     if ((start % PGSIZE) != 0)
         return -1;
 
-    if ((len % PGSIZE) != 0)
-        return -1;
+    uint64 aligned_len = PGROUNDUP(len);
+    uint64 npages = aligned_len / PGSIZE;
 
     uint64 va = start;
-    uint64 npages = len / PGSIZE;
-
     // check all pages are mapped
     for (uint64 i = 0; i < npages; i++) {
         pte_t *pte = walk(p->pagetable, va + i * PGSIZE, 0);
