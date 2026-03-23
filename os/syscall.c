@@ -171,7 +171,6 @@ void syscall()
 	*/
 	curr_proc()->ti.syscall_times[id]++;
 
-	
 	switch (id) {
 	case SYS_write:
 		ret = sys_write(args[0], args[1], args[2]);
