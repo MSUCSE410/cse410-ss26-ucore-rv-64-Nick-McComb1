@@ -240,6 +240,18 @@ void syscall()
 	case SYS_getpid:
 		ret = sys_getpid();
 		break;
+	/*
+	* LAB1: you may need to add SYS_taskinfo case here
+	*/
+	case SYS_taskinfo:
+		ret = sys_task_info((TaskInfo *) args[0]);
+		break;
+	case SYS_mmap:
+		ret = sys_mmap(args[0], args[1], args[2], args[3], args[4]);
+		break;
+	case SYS_munmap:
+		ret = sys_munmap(args[0], args[1]);
+		break;
 	case SYS_getppid:
 		ret = sys_getppid();
 		break;
