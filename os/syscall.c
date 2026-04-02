@@ -53,6 +53,7 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofd
 // hint: read through docstrings in vm.c. Watching CH4 video may also help.
 // Note the return value and PTE flags (especially U,X,W,R)
 
+//allocates memory and maps it into a process’s virtual address space.
 uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
 {
     struct proc *p = curr_proc();
@@ -68,7 +69,7 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
         return -1;
     if ((port & 0x7) == 0)    // must have at least one permission
         return -1;
-    // 4. alignment (VERY IMPORTANT for your tests)
+    // 4. alignment 
     if ((start % PGSIZE) != 0)
         return -1;
 
@@ -106,14 +107,14 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
     }
     return 0;
 }
-
+//removes mappings and frees memory
 uint64 sys_munmap(uint64 start, uint64 len)
 {
     struct proc *p = curr_proc();
 
     if (len == 0)
         return 0;
-    // ❗ IMPORTANT: enforce alignment
+    // enforce alignment
     if ((start % PGSIZE) != 0)
         return -1;
 
