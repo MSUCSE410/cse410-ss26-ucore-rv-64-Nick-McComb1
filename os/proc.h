@@ -10,6 +10,22 @@
 
 struct file;
 
+//taskstatus enumeration
+typedef enum {
+	UnInit,
+	Ready,
+	Running,
+	Exited,
+} TaskStatus;
+
+//task info struct
+typedef struct {
+	TaskStatus status;
+	unsigned int syscall_times[MAX_SYSCALL_NUM];
+	int time;
+	uint64 start_time;
+} TaskInfo;
+
 // Saved registers for kernel context switches.
 struct context {
 	uint64 ra;
@@ -45,6 +61,8 @@ struct proc {
 	struct proc *parent; // Parent process
 	uint64 exit_code;
 	struct file *files[FD_BUFFER_SIZE];
+
+	TaskInfo ti;
 };
 
 int cpuid();
