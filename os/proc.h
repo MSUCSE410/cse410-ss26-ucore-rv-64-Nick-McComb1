@@ -7,6 +7,7 @@
 
 #define NPROC (512)
 #define FD_BUFFER_SIZE (16)
+#define MAX_SYSCALL_NUM 500
 
 struct file;
 
