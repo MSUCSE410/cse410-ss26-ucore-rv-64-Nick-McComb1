@@ -221,6 +221,9 @@ void syscall()
 			   trapframe->a3, trapframe->a4, trapframe->a5 };
 	tracef("syscall %d args = [%x, %x, %x, %x, %x, %x]", id, args[0],
 	       args[1], args[2], args[3], args[4], args[5]);
+
+	curr_proc()->ti.syscall_times[id]++;
+
 	switch (id) {
 	case SYS_write:
 		ret = sys_write(args[0], args[1], args[2]);
