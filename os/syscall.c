@@ -131,7 +131,7 @@ uint64 sys_set_priority(long long prio)
     struct proc *p = curr_proc();
     p->priority = (int)prio; // recalculate pass value based on priority
 	// higher priority is scheduled more often
-    p->pass = BIG_STRIDE / (uint64)prio;
+    p->pass = BIG_STRIDE / (uint64)prio; // stride scheduling algo
     return prio; // returns value based on success
 }
 
