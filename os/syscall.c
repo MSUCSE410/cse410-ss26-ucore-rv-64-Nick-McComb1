@@ -49,122 +49,15 @@ uint64 sys_sched_yield()
 	return 0;
 }
 
-
-uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofday in pagetable. (VA to PA)
+uint64 sys_gettimeofday(uint64 val, int _tz)
 {
-    struct proc *p = curr_proc();
-
-    TimeVal tv;
-    uint64 cycle = get_cycle();
-    tv.sec = cycle / CPU_FREQ;
-    tv.usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
-
-    if(copyout(p->pagetable, (uint64)val, (char*)&tv, sizeof(TimeVal)) < 0)
-        return -1;
-
-    return 0;
-}
-
-// TODO: add support for mmap and munmap syscall.
-// hint: read through docstrings in vm.c. Watching CH4 video may also help.
-// Note the return value and PTE flags (especially U,X,W,R)
-
-//allocates memory and maps it into a process’s virtual address space.
-uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd)
-{
-    struct proc *p = curr_proc();
-
-    // 1. len == 0 → success
-    if (len == 0)
-        return 0;
-    // 2. max size (1 GiB)
-    if (len > (1ULL << 30))
-        return -1;
-    // 3. port validation
-    if ((port & ~0x7) != 0)   // only lower 3 bits allowed
-        return -1;
-    if ((port & 0x7) == 0)    // must have at least one permission
-        return -1;
-    // 4. alignment 
-    if ((start % PGSIZE) != 0)
-        return -1;
-
-    uint64 aligned_len = PGROUNDUP(len);
-    uint64 va = start;
-    uint64 end = start + aligned_len;
-
-    // 5. check for already mapped pages
-    for (uint64 a = va; a < end; a += PGSIZE) {
-        if (walkaddr(p->pagetable, a) != 0) {
-            return -1;
-        }
-    }
-
-    // 6. convert port → PTE flags
-    int perm = PTE_U;
-    if (port & 0x1) perm |= PTE_R;
-    if (port & 0x2) perm |= PTE_W;
-    if (port & 0x4) perm |= PTE_X;
-
-    // 7. allocate + map pages
-    for (uint64 a = va; a < end; a += PGSIZE) {
-        char *mem = kalloc();
-        if (mem == 0) {
-            // rollback previously allocated pages
-            uvmunmap(p->pagetable, va, (a - va) / PGSIZE, 1);
-            return -1;
-        }
-        memset(mem, 0, PGSIZE);
-        if (mappages(p->pagetable, a, PGSIZE, (uint64)mem, perm) != 0) {
-            kfree(mem);
-            uvmunmap(p->pagetable, va, (a - va) / PGSIZE, 1);
-            return -1;
-        }
-    }
-    return 0;
-}
-//removes mappings and frees memory
-uint64 sys_munmap(uint64 start, uint64 len)
-{
-    struct proc *p = curr_proc();
-
-    if (len == 0)
-        return 0;
-    // enforce alignment
-    if ((start % PGSIZE) != 0)
-        return -1;
-
-    uint64 aligned_len = PGROUNDUP(len);
-    uint64 npages = aligned_len / PGSIZE;
-
-    uint64 va = start;
-    // check all pages are mapped
-    for (uint64 i = 0; i < npages; i++) {
-        pte_t *pte = walk(p->pagetable, va + i * PGSIZE, 0);
-        if (!pte || (*pte & PTE_V) == 0)
-            return -1;
-    }
-
-    uvmunmap(p->pagetable, va, npages, 1);
-
-    return 0;
-}
-
-/*
-* LAB1: you may need to define sys_task_info here
-*/
-uint64 sys_task_info(TaskInfo *ti){
 	struct proc *p = curr_proc();
-
-    TaskInfo info = p->ti;
-
-    uint64 now = (get_cycle() * 1000) / CPU_FREQ;
-    info.time = now - info.start_time;
-
-    if(copyout(p->pagetable, (uint64)ti, (char*)&info, sizeof(TaskInfo)) < 0)
-        return -1;
-
-    return 0;     
+	uint64 cycle = get_cycle();
+	TimeVal t;
+	t.sec = cycle / CPU_FREQ;
+	t.usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
+	copyout(p->pagetable, val, (char *)&t, sizeof(TimeVal));
+	return 0;
 }
 
 uint64 sys_getpid()
@@ -202,14 +95,105 @@ uint64 sys_wait(int pid, uint64 va)
 
 uint64 sys_spawn(uint64 va)
 {
-	// TODO: your job is to complete the sys call
-	return -1;
+    struct proc *p = curr_proc();
+    char name[200];
+	// copy program name string
+    copyinstr(p->pagetable, name, va, 200);
+    debugf("sys_spawn %s\n", name);
+
+    // check if program exists
+    int id = get_id_by_name(name);
+    if (id < 0)
+        return -1;
+
+    // allocate new process
+    struct proc *np = allocproc();
+    if (np == NULL)
+        return -1;
+
+    // set parent
+    np->parent = p;
+
+    // load program into new process
+    if (loader(id, np) < 0) {
+        freeproc(np);
+        return -1;
+    }
+
+    np->state = RUNNABLE;
+    return np->pid; // run child pid to parent
 }
 
-uint64 sys_set_priority(long long prio){
-    // TODO: your job is to complete the sys call
-    return -1;
+uint64 sys_set_priority(long long prio)
+{
+    if (prio < 2) // priority must be at least 2
+        return -1;
+    struct proc *p = curr_proc();
+    p->priority = (int)prio; // recalculate pass value based on priority
+	// higher priority is scheduled more often
+    p->pass = BIG_STRIDE / (uint64)prio;
+    return prio; // returns value based on success
 }
+
+uint64 sys_mmap(uint64 start, uint64 len, int prot)
+{
+    if (start % PGSIZE != 0) return -1;
+    if (len == 0) return -1;
+    if (start >= MAXVA) return -1;
+    if (start + len < start) return -1;
+    if (start + len > MAXVA) return -1;
+    if ((prot & ~0x7) != 0) return -1;
+
+    int perm = 0;
+    if (prot & 0x1) perm |= PTE_R;
+    if (prot & 0x2) perm |= PTE_W;
+    if (prot & 0x4) perm |= PTE_X;
+    if (perm == 0) return -1;
+
+    struct proc *p = curr_proc();
+    uint64 npages = (len + PGSIZE - 1) / PGSIZE;
+
+    for (uint64 i = 0; i < npages; i++) {
+        uint64 va = start + i * PGSIZE;
+        if (walkaddr(p->pagetable, va) != 0) return -1;
+
+        void *pa = kalloc();
+        if (pa == 0) return -1;
+        memset(pa, 0, PGSIZE);
+
+        if (mappages(p->pagetable, va, PGSIZE, (uint64)pa, perm | PTE_U) < 0) {
+            kfree(pa);
+            return -1;
+        }
+    }
+
+    uint64 end_page = (start + len + PGSIZE - 1) / PGSIZE;
+    if (end_page > p->max_page)
+        p->max_page = end_page;
+
+    return 0;
+}
+
+uint64 sys_munmap(uint64 start, uint64 len)
+{
+    if (start % PGSIZE != 0) return -1;
+    if (len == 0) return -1;
+    if (start >= MAXVA) return -1;
+    if (start + len < start) return -1;
+    if (start + len > MAXVA) return -1;
+
+    struct proc *p = curr_proc();
+    uint64 npages = (len + PGSIZE - 1) / PGSIZE;
+
+    for (uint64 i = 0; i < npages; i++) {
+        uint64 va = start + i * PGSIZE;
+        if (walkaddr(p->pagetable, va) == 0) return -1;
+    }
+
+    uvmunmap(p->pagetable, start, npages, 1);
+    return 0;
+}
+
 
 
 extern char trap_page[];
@@ -222,9 +206,6 @@ void syscall()
 			   trapframe->a3, trapframe->a4, trapframe->a5 };
 	tracef("syscall %d args = [%x, %x, %x, %x, %x, %x]", id, args[0],
 	       args[1], args[2], args[3], args[4], args[5]);
-
-	curr_proc()->ti.syscall_times[id]++;
-
 	switch (id) {
 	case SYS_write:
 		ret = sys_write(args[0], args[1], args[2]);
@@ -244,18 +225,6 @@ void syscall()
 	case SYS_getpid:
 		ret = sys_getpid();
 		break;
-	/*
-	* LAB1: you may need to add SYS_taskinfo case here
-	*/
-	case SYS_taskinfo:
-		ret = sys_task_info((TaskInfo *) args[0]);
-		break;
-	case SYS_mmap:
-		ret = sys_mmap(args[0], args[1], args[2], args[3], args[4]);
-		break;
-	case SYS_munmap:
-		ret = sys_munmap(args[0], args[1]);
-		break;
 	case SYS_getppid:
 		ret = sys_getppid();
 		break;
@@ -271,6 +240,15 @@ void syscall()
 	case SYS_spawn:
 		ret = sys_spawn(args[0]);
 		break;
+	case SYS_mmap:
+    	ret = sys_mmap(args[0], args[1], args[2]);
+    	break;
+	case SYS_munmap:
+    	ret = sys_munmap(args[0], args[1]);
+    	break;
+	case SYS_setpriority:
+    	ret = sys_set_priority((long long)args[0]);
+    	break;
 	default:
 		ret = -1;
 		errorf("unknown syscall %d", id);
