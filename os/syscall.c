@@ -176,20 +176,99 @@ uint64 sys_close(int fd)
 	p->files[fd] = 0;
 	return 0;
 }
+/*
+ * sys_fstat - Syscall ID 80
+ * Gets the status/metadata of an open file and writes it into a
+ * user-space Stat struct.
+ *
+ * Parameters:
+ *   fd  - file descriptor index into the current process's file table
+ *   stat - user-space virtual address where the Stat struct will be written
+ *
+ * Returns 0 on success, -1 on error.
+ */
+int sys_fstat(int fd, uint64 stat) {
+	/* 
+     * Validate the file descriptor range.
+     * fd must be between 0 and FD_BUFFER_SIZE-1 (e.g. 0-15).
+     * Negative fds are obviously invalid. fds >= FD_BUFFER_SIZE would
+     * be an out-of-bounds access on the files[] array.
+     */
+    if (fd < 0 || fd >= FD_BUFFER_SIZE)
+        return -1;
 
-int sys_fstat(int fd,uint64 stat){
-	//TODO: your job is to complete the syscall
-	return -1;
+    struct proc *p = curr_proc();
+	/*
+     * Look up the file struct for this fd in the process's file table.
+     */
+    struct file *f = p->files[fd];
+    if (f == NULL) {
+        errorf("invalid fd %d\n", fd);
+        return -1;
+    }
+	/*
+     * Only FD_INODE files (regular files on disk) have inode metadata.
+     * if not they have no meaningful stat info, so we reject them here.
+     */
+    if (f->type != FD_INODE)
+        return -1;
+	 /*
+     * Delegate to inodestat()
+	 */
+    return inodestat(f->ip, p->pagetable, stat);
+}
+/*
+ * sys_linkat - Syscall ID 37
+ * Creates a hard link: makes a new directory entry (newpath) that points
+ * to the same inode as an existing file (oldpath). After this, both names
+ * refer to the same file data and the inode's nlink count increases by 1.
+ *
+ * Parameters:
+ *   olddirfd - ignored (always AT_FDCWD = -100 in this implementation)
+ *   oldpath  - user-space virtual address of the source filename string
+ *   newdirfd - ignored (always AT_FDCWD = -100 in this implementation)
+ *   newpath  - user-space virtual address of the new link filename string
+ *   flags    - ignored (always 0 in this implementation)
+ *
+ * Returns 0 on success, -1 on error (e.g. same name, source not found).
+ */
+int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint64 flags) {
+    struct proc *p = curr_proc();
+    char old[200], new[200];
+	/*
+	 * Copy the old and new path strings from user space into kernel buffers.
+     * This is necessary because user pointers cannot be dereferenced
+     * directly in the kernel — the kernel and user have separate
+     * virtual address spaces.
+     */
+    copyinstr(p->pagetable, old, oldpath, 200);
+    copyinstr(p->pagetable, new, newpath, 200);
+    // Error: linking to the same name
+    if (strncmp(old, new, 200) == 0)
+        return -1;
+	/*
+     * Delegate to filelink(old, new) which:
+	 */
+    return filelink(old, new);
 }
 
-int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint64 flags){
-	//TODO: your job is to complete the syscall
-	return -1;
-}
-
-int sys_unlinkat(int dirfd, uint64 name, uint64 flags){
-	//TODO: your job is to complete the syscall
-	return -1;
+/*
+ * sys_unlinkat - Syscall ID 35
+ * Removes a directory entry (filename) and decrements the inode's nlink count.
+ *
+ * Parameters:
+ *   dirfd - ignored (always AT_FDCWD = -100 in this implementation)
+ *   name  - user-space virtual address of the filename string to remove
+ *   flags - ignored (always 0 in this implementation)
+ *
+ * Returns 0 on success, -1 on error (e.g. file not found, permission denied).
+ */
+int sys_unlinkat(int dirfd, uint64 name, uint64 flags) {
+    struct proc *p = curr_proc();
+    char path[200];
+	//copy to kernel buffer
+    copyinstr(p->pagetable, path, name, 200);
+    return fileunlink(path);
 }
 
 extern char trap_page[];
@@ -247,6 +326,7 @@ void syscall()
 		break;
 	case SYS_unlinkat:
 	    ret = sys_unlinkat(args[0],args[1],args[2]);
+		break;
 	case SYS_spawn:
 		ret = sys_spawn(args[0]);
 		break;

@@ -17,6 +17,18 @@
 #define ROOTINO 1 // root i-number
 #define BSIZE 1024 // block size
 
+// Add this block anywhere before the function declarations:
+#define DIR  0x040000  // directory
+#define FILE 0x100000  // ordinary regular file
+
+typedef struct {
+    uint64 dev;    // drive number (always 0)
+    uint64 ino;    // inode number
+    uint32 mode;   // file type (DIR or FILE)
+    uint32 nlink;  // number of hard links
+    uint64 pad[7]; // compatibility padding
+} Stat;
+
 // Disk layout:
 // [ boot block | super block | inode blocks | free bit map | data blocks]
 //
@@ -43,13 +55,11 @@ struct superblock {
 
 // On-disk inode structure
 struct dinode {
-	short type; // File type
-	short pad[3];
-	// LAB4: you can reduce size of pad array and add link count below,
-	//       or you can just regard a pad as link count.
-	//       But keep in mind that you'd better keep sizeof(dinode) unchanged
-	uint size; // Size of file (bytes)
-	uint addrs[NDIRECT + 1]; // Data block addresses
+    short type;
+    short nlink;  // hard link count
+    short pad[2]; // reduced from 3 to keep sizeof(dinode) unchanged
+    uint size;
+    uint addrs[NDIRECT + 1];
 };
 
 // Inodes per block.
@@ -92,4 +102,6 @@ int readi(struct inode *, int, uint64, uint, uint);
 int writei(struct inode *, int, uint64, uint, uint);
 void itrunc(struct inode *);
 int dirls(struct inode *);
+int dirunlink(struct inode *dp, char *name);
+int inodestat(struct inode *ip, uint64 *pagetable, uint64 stat_addr);
 #endif //!__FS_H__

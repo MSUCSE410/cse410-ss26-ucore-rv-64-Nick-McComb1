@@ -15,6 +15,7 @@ struct inode {
 	int ref; // Reference count
 	int valid; // inode has been read from disk?
 	short type; // copy of disk inode
+	short nlink;  // hard link count (mirrored from dinode)
 	uint size;
 	uint addrs[NDIRECT + 1];
 	// LAB4: You may need to add link count here
@@ -46,5 +47,7 @@ uint64 inodewrite(struct file *, uint64, uint64);
 uint64 inoderead(struct file *, uint64, uint64);
 struct file *stdio_init(int);
 int show_all_files();
-
+// Add alongside the other declarations:
+int filelink(char *old, char *new);
+int fileunlink(char *path);
 #endif // FILE_H

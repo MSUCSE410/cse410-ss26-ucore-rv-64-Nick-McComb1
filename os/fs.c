@@ -114,6 +114,7 @@ struct inode *ialloc(uint dev, short type)
 		if (dip->type == 0) { // a free inode
 			memset(dip, 0, sizeof(*dip));
 			dip->type = type;
+			dip->nlink = 1;  // new: every inode starts with 1 hard link
 			bwrite(bp);
 			brelse(bp);
 			return iget(dev, inum);
@@ -135,6 +136,7 @@ void iupdate(struct inode *ip)
 	bp = bread(ip->dev, IBLOCK(ip->inum, sb));
 	dip = (struct dinode *)bp->data + ip->inum % IPB;
 	dip->type = ip->type;
+	dip->nlink = ip->nlink;  // sync nlink to disk
 	dip->size = ip->size;
 	// LAB4: you may need to update link count here
 	memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
@@ -188,6 +190,7 @@ void ivalid(struct inode *ip)
 		bp = bread(ip->dev, IBLOCK(ip->inum, sb));
 		dip = (struct dinode *)bp->data + ip->inum % IPB;
 		ip->type = dip->type;
+		ip->nlink = dip->nlink;  // load nlink from disk
 		ip->size = dip->size;
 		// LAB4: You may need to get lint count here
 		memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
@@ -205,17 +208,17 @@ void ivalid(struct inode *ip)
 // to it, free the inode (and its content) on disk.
 // All calls to iput() must be inside a transaction in
 // case it has to free the inode.
+// In os/fs.c, change iput:
 void iput(struct inode *ip)
 {
-	// LAB4: Unmark the condition and change link count variable name (nlink) if needed
-	if (ip->ref == 1 && ip->valid && 0 /*&& ip->nlink == 0*/) {
-		// inode has no links and no other references: truncate and free.
-		itrunc(ip);
-		ip->type = 0;
-		iupdate(ip);
-		ip->valid = 0;
-	}
-	ip->ref--;
+    if (ip->ref == 1 && ip->valid && ip->nlink == 0 && ip->type == T_FILE) {
+        // only free regular files, not directories
+        itrunc(ip);
+        ip->type = 0;
+        iupdate(ip);
+        ip->valid = 0;
+    }
+    ip->ref--;
 }
 
 // Inode content
@@ -427,9 +430,57 @@ int dirlink(struct inode *dp, char *name, uint inum)
 		panic("dirlink");
 	return 0;
 }
-
+//CHANGES BELOW
 // LAB4: You may want to add dirunlink here
+// Remove a directory entry by name. Returns 0 on success, -1 if not found.
+int dirunlink(struct inode *dp, char *name)
+{
+    uint off;
+    struct dirent de;
+	// Safety check: dp must be a directory inode, not a regular file
+    if (dp->type != T_DIR)
+        panic("dirunlink not DIR");
+	// Walk through every directory entry in the directory, BSIZE-aligned
+    // dp->size is the total byte size of the directory's entry list
+    for (off = 0; off < dp->size; off += sizeof(de)) {
+		// Read one dirent from the directory inode's data into kernel buffer `de`
+        // 0 = dst is a kernel address (not user virtual), off = byte offset
+        if (readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+            panic("dirunlink read");
+		// inum == 0 means this dirent slot is already empty/unused, skip it
+        if (de.inum == 0)
+            continue;
+		// Compare the entry's name against the target name, up to DIRSIZ chars
+        if (strncmp(name, de.name, DIRSIZ) == 0) {
+            // Zero out this directory entry
+            memset(&de, 0, sizeof(de));
+			// Write the zeroed dirent back to the exact same offset on disk
+            if (writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
+                panic("dirunlink write");
+            return 0;
+        }
+    }
+    return -1;  // not found
+}
 
+// Fill in a Stat struct in userspace for the given inode.
+int inodestat(struct inode *ip, uint64 *pagetable, uint64 stat_addr)
+{
+	// Ensure the inode's fields are loaded from disk into the in-memory
+    ivalid(ip);
+    Stat st;
+    st.dev   = 0;  // Drive number — always 0, single disk in this OS
+    st.ino   = ip->inum;  // Inode number: uniquely identifies this file on disk
+    st.mode  = (ip->type == T_DIR) ? DIR : FILE; 
+    st.nlink = ip->nlink; // Number of hard links currently pointing to this inode
+    memset(st.pad, 0, sizeof(st.pad));
+
+	// Copy the completed Stat struct from kernel memory into user-space.
+    if (copyout(pagetable, stat_addr, (char *)&st, sizeof(Stat)) < 0)
+        return -1;
+    return 0;
+}
+//STOP HERE
 //Return the inode of the root directory
 struct inode *root_dir()
 {
