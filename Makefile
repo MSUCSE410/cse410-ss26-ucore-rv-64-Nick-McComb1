@@ -71,6 +71,8 @@ $(AS_OBJS): $(BUILDDIR)/$K/%.o : $K/%.S
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILDDIR)/os/link_app.o: user
+
 $(C_OBJS): $(BUILDDIR)/$K/%.o : $K/%.c  $(BUILDDIR)/$K/%.d
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@

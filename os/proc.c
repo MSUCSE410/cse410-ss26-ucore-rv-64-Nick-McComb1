@@ -143,6 +143,22 @@ found:
 	p->next_semaphore_id = 0;
 	p->next_condvar_id = 0;
 	// LAB5: (1) you may initialize your new proc variables here
+	// LAB5: (1) Zero-initialise all deadlock-detection state for this
+	//           new process so we never see garbage in the arrays.
+	//
+	// deadlock_detect_enabled starts OFF — the process must call
+	// enable_deadlock_detect(1) explicitly to arm the detector.
+	//
+	// All available[], allocation[][], and request[][] arrays start at
+	// zero; sys_mutex_create / sys_semaphore_create will set
+	// available[id] to the correct initial count when a lock is created.
+	p->deadlock_detect_enabled = 0;
+	memset(p->mutex_available, 0, sizeof(p->mutex_available));
+	memset(p->mutex_allocation, 0, sizeof(p->mutex_allocation));
+	memset(p->mutex_request, 0, sizeof(p->mutex_request));
+	memset(p->sem_available, 0, sizeof(p->sem_available));
+	memset(p->sem_allocation, 0, sizeof(p->sem_allocation));
+	memset(p->sem_request, 0, sizeof(p->sem_request));
 	return p;
 }
 
